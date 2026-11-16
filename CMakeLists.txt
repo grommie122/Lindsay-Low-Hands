@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LindsayDistortion VERSION 1.0.0 LANGUAGES C CXX)
+project(LindsayDistortion VERSION 1.1.0 LANGUAGES C CXX)
 
 if(JUCE_DIR)
     add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
@@ -20,6 +20,7 @@ target_sources(LindsayDistortion PRIVATE Plugin.cpp)
 target_compile_features(LindsayDistortion PRIVATE cxx_std_17)
 target_compile_definitions(LindsayDistortion PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(LindsayDistortion PRIVATE juce::juce_audio_processors)
+
 
 
 

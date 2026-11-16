@@ -11,10 +11,12 @@ struct Control
     float minimum, maximum, initial;
 };
 
-constexpr std::array<Control, 4> controls {{
-    {"gain", "Gain (dB)", 12, 54, 35},
+constexpr std::array<Control, 6> controls {{
+    {"gain", "Gain (dB)", 12, 60, 42},
     {"tight", "Tight (%)", 0, 100, 62},
-    {"tone", "Tone (%)", 0, 100, 48},
+    {"bass", "Bass (dB)", -12, 12, 2},
+    {"mid", "Mid (dB)", -12, 12, -2},
+    {"treble", "Treble (dB)", -12, 12, 1},
     {"level", "Level (dB)", -30, 6, -10}
 }};
 
@@ -49,7 +51,7 @@ public:
             addAndMakeVisible(knob);
             knobLinks[i] = std::make_unique<State::SliderAttachment>(state, control.id, knob);
         }
-        setSize(580, 264);
+        setSize(820, 264);
     }
 
     void paint(juce::Graphics& g) override
@@ -59,12 +61,12 @@ public:
         g.setFont(26.0f);
         g.drawText("Lindsay Low-Hands", 20, 12, 580, 38, juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff302541));
-        g.fillRoundedRectangle(20, 60, 540, 184, 12);
+        g.fillRoundedRectangle(20, 60, 780, 184, 12);
         g.setColour(juce::Colours::white);
         g.setFont(17.0f);
         g.drawText("Metal distortion", 34, 67, 120, 25, juce::Justification::centredLeft);
         g.saveState();
-        g.addTransform(juce::AffineTransform::scale(0.58f).translated(495.0f, 5.0f));
+        g.addTransform(juce::AffineTransform::scale(0.58f).translated(755.0f, 5.0f));
         juce::Path sole;
         sole.startNewSubPath(44, 16);
         sole.cubicTo(60, 12, 70, 27, 64, 40);
@@ -102,10 +104,10 @@ public:
     }
 
 private:
-    static constexpr std::array<size_t, 4> knobIndices {0, 1, 2, 3};
-    static constexpr std::array<int, 4> knobX {36, 169, 302, 435};
-    std::array<juce::Slider, 4> knobs;
-    std::array<std::unique_ptr<State::SliderAttachment>, 4> knobLinks;
+    static constexpr std::array<size_t, 6> knobIndices {0, 1, 2, 3, 4, 5};
+    static constexpr std::array<int, 6> knobX {34, 163, 292, 421, 550, 679};
+    std::array<juce::Slider, 6> knobs;
+    std::array<std::unique_ptr<State::SliderAttachment>, 6> knobLinks;
 };
 
 class LindsayDistortion final : public juce::AudioProcessor
@@ -156,6 +158,8 @@ public:
         bass.fill(0.0f);
         speaker.fill(0.0f);
         dc.fill(0.0f);
+        low.fill(0.0f);
+        crossover.fill(0.0f);
     }
 
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
@@ -166,6 +170,9 @@ public:
             return 1.0f - std::exp(-juce::MathConstants<float>::twoPi * hz / rate);
         };
         const auto dcCoefficient = coefficient(18.0f);
+        const auto lowSplit = coefficient(230.0f);
+        const auto highSplit = coefficient(1900.0f);
+        const auto speakerCoefficient = coefficient(6200.0f);
         for (size_t i = 0; i < parameters.size(); ++i)
             parameters[i].setTargetValue(values[i]->load());
 
@@ -173,10 +180,11 @@ public:
         {
             const auto drive = juce::Decibels::decibelsToGain(parameters[0].getNextValue());
             const auto tight = parameters[1].getNextValue() * 0.01f;
-            const auto brightness = parameters[2].getNextValue() * 0.01f;
-            const auto level = juce::Decibels::decibelsToGain(parameters[3].getNextValue());
+            const auto lowGain = juce::Decibels::decibelsToGain(parameters[2].getNextValue());
+            const auto midGain = juce::Decibels::decibelsToGain(parameters[3].getNextValue());
+            const auto highGain = juce::Decibels::decibelsToGain(parameters[4].getNextValue());
+            const auto level = juce::Decibels::decibelsToGain(parameters[5].getNextValue());
             const auto bassCoefficient = coefficient(45.0f + 195.0f * tight);
-            const auto speakerCoefficient = coefficient(1800.0f + 5700.0f * brightness);
 
             for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
             {
@@ -184,10 +192,17 @@ public:
                 bass[channel] += bassCoefficient * (input - bass[channel]);
                 const auto driven = (input - bass[channel]) * drive;
                 const auto preamp = std::tanh(driven);
-                const auto clipped = std::tanh(2.4f * preamp + 0.23f) - std::tanh(0.23f);
+                const auto secondStage = std::tanh(3.6f * preamp + 0.23f) - std::tanh(0.23f);
+                const auto clipped = juce::jlimit(-0.83f, 0.83f, 1.7f * secondStage);
                 speaker[channel] += speakerCoefficient * (clipped - speaker[channel]);
                 dc[channel] += dcCoefficient * (speaker[channel] - dc[channel]);
-                buffer.setSample(channel, sample, level * (speaker[channel] - dc[channel]));
+                const auto signal = speaker[channel] - dc[channel];
+                low[channel] += lowSplit * (signal - low[channel]);
+                crossover[channel] += highSplit * (signal - crossover[channel]);
+                const auto equalized = lowGain * low[channel]
+                                     + midGain * (crossover[channel] - low[channel])
+                                     + highGain * (signal - crossover[channel]);
+                buffer.setSample(channel, sample, level * equalized);
             }
         }
     }
@@ -206,9 +221,9 @@ public:
 
 private:
     State state;
-    std::array<std::atomic<float>*, 4> values {};
-    std::array<juce::SmoothedValue<float>, 4> parameters;
-    std::array<float, 2> bass {}, speaker {}, dc {};
+    std::array<std::atomic<float>*, 6> values {};
+    std::array<juce::SmoothedValue<float>, 6> parameters;
+    std::array<float, 2> bass {}, speaker {}, dc {}, low {}, crossover {};
     float rate = 44100.0f;
 };
 }
@@ -217,6 +232,8 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new LindsayDistortion();
 }
+
+
 
 
 

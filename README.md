@@ -1,6 +1,6 @@
 # Lindsay Low-Hands
 
-Lindsay Low-Hands is a Windows x64 high-gain metal distortion VST3. Gain drives two clipping stages. Tight cuts bass before clipping, Tone adjusts the post-clipping low-pass filter, and Level sets the output.
+Lindsay Low-Hands is a Windows x64 high-gain metal distortion VST3. Gain drives three clipping stages. Tight cuts bass before clipping. Bass, Mid, and Treble each adjust the post-distortion EQ by up to 12 dB. Level sets the output.
 
 ## Build
 
@@ -23,6 +23,7 @@ search path. On this machine the per-user path is
 `%LOCALAPPDATA%\Programs\Common\VST3`.
 In REAPER, open Preferences > Plug-ins > VST and click Re-scan. On a track,
 open FX and search for Lindsay Low-Hands.
+
 
 
 
