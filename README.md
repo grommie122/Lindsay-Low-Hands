@@ -28,3 +28,9 @@ open FX and search for Lindsay Low-Hands.
 
 
 
+
+## GitHub releases
+
+Publishing a GitHub release builds the tagged source in Windows x64 Release
+configuration and attaches `Lindsay-Low-Hands-Windows-x64.zip` to that release.
+Create the release tag from a commit that includes the release workflow.

@@ -1,0 +1,42 @@
+name: Windows VST3 release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Configure Windows x64
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release VST3
+        run: cmake --build build --config Release --target LindsayDistortion_VST3 --parallel 2
+
+      - name: Package VST3 bundle
+        shell: pwsh
+        run: |
+          $bundle = 'build/LindsayDistortion_artefacts/Release/VST3/Lindsay Low-Hands.vst3'
+          $binary = Join-Path $bundle 'Contents/x86_64-win/Lindsay Low-Hands.vst3'
+          if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+            throw "Expected VST3 binary missing: $binary"
+          }
+          Compress-Archive -LiteralPath $bundle -DestinationPath 'Lindsay-Low-Hands-Windows-x64.zip'
+
+      - name: Attach ZIP to the published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload --repo "$env:GITHUB_REPOSITORY" --clobber -- "$env:RELEASE_TAG" 'Lindsay-Low-Hands-Windows-x64.zip'
