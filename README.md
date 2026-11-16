@@ -1,5 +1,10 @@
 # Lindsay Low-Hands
 
+[Download Windows x64 VST3 ZIP](https://github.com/grommie122/Lindsay-Low-Hands/releases/download/rolling-windows/Lindsay-Low-Hands-Windows-x64.zip)
+
+GitHub Actions refreshes this ZIP after successful builds from `main`.
+
+
 Lindsay Low-Hands is a Windows x64 high-gain metal distortion VST3. Gain drives three clipping stages. Tight cuts bass before clipping. Bass, Mid, and Treble each adjust the post-distortion EQ by up to 12 dB. Level sets the output.
 
 ## Build
