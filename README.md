@@ -39,3 +39,5 @@ open FX and search for Lindsay Low-Hands.
 Publishing a GitHub release builds the tagged source in Windows x64 Release
 configuration and attaches `Lindsay-Low-Hands-Windows-x64.zip` to that release.
 Create the release tag from a commit that includes the release workflow.
+
+Gate sets the input noise threshold before distortion. Off is the default; raise the threshold until idle noise drops away.

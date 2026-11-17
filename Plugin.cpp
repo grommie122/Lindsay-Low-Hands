@@ -11,13 +11,17 @@ struct Control
     float minimum, maximum, initial;
 };
 
-constexpr std::array<Control, 6> controls {{
+constexpr float gateOff = -81.0f;
+constexpr size_t gateIndex = 6;
+
+constexpr std::array<Control, 7> controls {{
     {"gain", "Gain (dB)", 12, 60, 42},
     {"tight", "Tight (%)", 0, 100, 62},
     {"bass", "Bass (dB)", -12, 12, 2},
     {"mid", "Mid (dB)", -12, 12, -2},
     {"treble", "Treble (dB)", -12, 12, 1},
-    {"level", "Level (dB)", -30, 6, -10}
+    {"level", "Level (dB)", -30, 6, -10},
+    {"gate", "Gate (dB)", gateOff, -20, gateOff}
 }};
 
 using State = juce::AudioProcessorValueTreeState;
@@ -28,9 +32,22 @@ State::ParameterLayout makeParameters()
     for (const auto& control : controls)
     {
         const juce::ParameterID id {control.id, 1};
+        juce::AudioParameterFloatAttributes attributes;
+        if (juce::StringRef(control.id) == juce::StringRef(controls[gateIndex].id))
+        {
+            attributes = attributes
+                .withStringFromValueFunction([](float value, int)
+                {
+                    return value <= gateOff ? juce::String("Off") : juce::String(value, 0);
+                })
+                .withValueFromStringFunction([](const juce::String& text)
+                {
+                    return text.trim().equalsIgnoreCase("Off") ? gateOff : text.getFloatValue();
+                });
+        }
         layout.add(std::make_unique<juce::AudioParameterFloat>(id, control.name,
             juce::NormalisableRange<float>{control.minimum, control.maximum, 1.0f},
-            control.initial));
+            control.initial, attributes));
     }
     return layout;
 }
@@ -42,7 +59,7 @@ public:
     {
         for (size_t i = 0; i < knobs.size(); ++i)
         {
-            const auto& control = controls[knobIndices[i]];
+            const auto& control = controls[i];
             auto& knob = knobs[i];
             knob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
             knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 76, 23);
@@ -51,7 +68,7 @@ public:
             addAndMakeVisible(knob);
             knobLinks[i] = std::make_unique<State::SliderAttachment>(state, control.id, knob);
         }
-        setSize(820, 264);
+        setSize(920, 264);
     }
 
     void paint(juce::Graphics& g) override
@@ -61,12 +78,12 @@ public:
         g.setFont(26.0f);
         g.drawText("Lindsay Low-Hands", 20, 12, 580, 38, juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff302541));
-        g.fillRoundedRectangle(20, 60, 780, 184, 12);
+        g.fillRoundedRectangle(20, 60, 880, 184, 12);
         g.setColour(juce::Colours::white);
         g.setFont(17.0f);
         g.drawText("Metal distortion", 34, 67, 120, 25, juce::Justification::centredLeft);
         g.saveState();
-        g.addTransform(juce::AffineTransform::scale(0.58f).translated(755.0f, 5.0f));
+        g.addTransform(juce::AffineTransform::scale(0.58f).translated(855.0f, 5.0f));
         juce::Path sole;
         sole.startNewSubPath(44, 16);
         sole.cubicTo(60, 12, 70, 27, 64, 40);
@@ -94,7 +111,7 @@ public:
         g.setColour(juce::Colours::white);
         g.setFont(13.0f);
         for (size_t i = 0; i < knobs.size(); ++i)
-            g.drawText(controls[knobIndices[i]].name, knobX[i], 208, 106, 23, juce::Justification::centred);
+            g.drawText(controls[i].name, knobX[i], 208, 106, 23, juce::Justification::centred);
     }
 
     void resized() override
@@ -104,10 +121,9 @@ public:
     }
 
 private:
-    static constexpr std::array<size_t, 6> knobIndices {0, 1, 2, 3, 4, 5};
-    static constexpr std::array<int, 6> knobX {34, 163, 292, 421, 550, 679};
-    std::array<juce::Slider, 6> knobs;
-    std::array<std::unique_ptr<State::SliderAttachment>, 6> knobLinks;
+    static constexpr std::array<int, 7> knobX {34, 158, 282, 406, 530, 654, 778};
+    std::array<juce::Slider, controls.size()> knobs;
+    std::array<std::unique_ptr<State::SliderAttachment>, controls.size()> knobLinks;
 };
 
 class LindsayDistortion final : public juce::AudioProcessor
@@ -145,6 +161,14 @@ public:
     void prepareToPlay(double sampleRate, int) override
     {
         rate = static_cast<float>(sampleRate);
+        const auto response = [this](float seconds)
+        {
+            return 1.0f - std::exp(-1.0f / (seconds * rate));
+        };
+        gateAttack = response(0.001f);
+        gateRelease = response(0.035f);
+        peakDecay = 1.0f - response(0.020f);
+        gateHoldSamples = juce::jmax(1, juce::roundToInt(rate * 0.030f));
         reset();
         for (size_t i = 0; i < parameters.size(); ++i)
         {
@@ -160,6 +184,9 @@ public:
         dc.fill(0.0f);
         low.fill(0.0f);
         crossover.fill(0.0f);
+        gateGain = values[gateIndex]->load() <= gateOff ? 1.0f : 0.0f;
+        gatePeak = 0.0f;
+        gateHold = 0;
     }
 
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
@@ -173,6 +200,10 @@ public:
         const auto lowSplit = coefficient(230.0f);
         const auto highSplit = coefficient(1900.0f);
         const auto speakerCoefficient = coefficient(6200.0f);
+        const auto gateDb = values[gateIndex]->load();
+        const auto gateEnabled = gateDb > gateOff;
+        const auto openThreshold = juce::Decibels::decibelsToGain(gateDb);
+        const auto closeThreshold = openThreshold * 0.708f; // 3 dB hysteresis
         for (size_t i = 0; i < parameters.size(); ++i)
             parameters[i].setTargetValue(values[i]->load());
 
@@ -186,9 +217,33 @@ public:
             const auto level = juce::Decibels::decibelsToGain(parameters[5].getNextValue());
             const auto bassCoefficient = coefficient(45.0f + 195.0f * tight);
 
+            // A single detector keeps left and right gain aligned for stereo signals.
+            if (gateEnabled)
+            {
+                gatePeak *= peakDecay;
+                for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                    gatePeak = juce::jmax(gatePeak, std::abs(buffer.getSample(channel, sample)));
+
+                if (gatePeak >= openThreshold || (gateHold > 0 && gatePeak >= closeThreshold))
+                    gateHold = gateHoldSamples;
+                else if (gateHold > 0)
+                    --gateHold;
+            }
+            else
+            {
+                gatePeak = 0.0f;
+                gateHold = 0;
+            }
+
+            const auto gateTarget = !gateEnabled || gateHold > 0 ? 1.0f : 0.0f;
+            const auto smoothing = gateTarget > gateGain ? gateAttack : gateRelease;
+            gateGain += smoothing * (gateTarget - gateGain);
+            if (std::abs(gateGain - gateTarget) < 1.0e-6f)
+                gateGain = gateTarget;
+
             for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
             {
-                const auto input = buffer.getSample(channel, sample);
+                const auto input = buffer.getSample(channel, sample) * gateGain;
                 bass[channel] += bassCoefficient * (input - bass[channel]);
                 const auto driven = (input - bass[channel]) * drive;
                 const auto preamp = std::tanh(driven);
@@ -216,15 +271,30 @@ public:
     {
         if (auto xml = getXmlFromBinary(data, bytes))
             if (xml->hasTagName(state.state.getType()))
-                state.replaceState(juce::ValueTree::fromXml(*xml));
+            {
+                auto restored = juce::ValueTree::fromXml(*xml);
+                const auto gateId = controls[gateIndex].id;
+                if (!restored.getChildWithProperty("id", gateId).isValid())
+                {
+                    // Older presets did not store a gate setting.
+                    juce::ValueTree gateParameter("PARAM");
+                    gateParameter.setProperty("id", gateId, nullptr);
+                    gateParameter.setProperty("value", gateOff, nullptr);
+                    restored.appendChild(gateParameter, nullptr);
+                }
+                state.replaceState(restored);
+            }
     }
 
 private:
     State state;
-    std::array<std::atomic<float>*, 6> values {};
-    std::array<juce::SmoothedValue<float>, 6> parameters;
+    std::array<std::atomic<float>*, controls.size()> values {};
+    std::array<juce::SmoothedValue<float>, gateIndex> parameters;
     std::array<float, 2> bass {}, speaker {}, dc {}, low {}, crossover {};
     float rate = 44100.0f;
+    float gateAttack = 0.0f, gateRelease = 0.0f, peakDecay = 0.0f;
+    float gateGain = 1.0f, gatePeak = 0.0f;
+    int gateHoldSamples = 0, gateHold = 0;
 };
 }
 

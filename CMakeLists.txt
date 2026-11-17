@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LindsayDistortion VERSION 1.1.0 LANGUAGES C CXX)
+project(LindsayDistortion VERSION 1.2.0 LANGUAGES C CXX)
 
 if(JUCE_DIR)
     add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
